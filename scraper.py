@@ -5,18 +5,22 @@ import pandas as pd
 import os
 import re
 from tqdm import tqdm
+import random
+import time
 
 
 # ============================================================
-#   CONFIG: Request Session (szybki i stabilny)
+#   STABILNA SESJA REQUESTS (do chmury / GitHub Actions)
 # ============================================================
+
 session = requests.Session()
 session.headers.update({"Accept": "application/json"})
 
 retries = Retry(
-    total=5,
-    backoff_factor=0.2,
-    status_forcelist=[429, 500, 502, 503, 504]
+    total=7,
+    backoff_factor=0.4,
+    status_forcelist=[400, 429, 500, 502, 503, 504],
+    allowed_methods=["GET"]
 )
 
 session.mount("https://", HTTPAdapter(max_retries=retries))
@@ -27,7 +31,6 @@ session.mount("https://", HTTPAdapter(max_retries=retries))
 # ============================================================
 
 def clean_for_excel(value):
-    """Usuwa niedozwolone znaki kontrolne dla Excela."""
     if isinstance(value, str):
         ILLEGAL_CHARACTERS_RE = re.compile(r'[\000-\010]|[\013-\014]|[\016-\037]')
         value = ILLEGAL_CHARACTERS_RE.sub('', value)
@@ -36,19 +39,21 @@ def clean_for_excel(value):
 
 
 def get_json(url, params=None):
-    """Pobiera JSON z retry i obsługą błędów."""
-    response = session.get(url, params=params, timeout=10)
+    """Bezpieczne pobieranie JSON."""
+    time.sleep(random.uniform(0.05, 0.15))  # Cloud throttling
+    response = session.get(url, params=params, timeout=20)
     response.raise_for_status()
     return response.json()
 
 
 def get_all_pages(url, base_params):
-    """Generator dla paginacji API."""
+    """Generuje wszystkie strony paginacji."""
     page = 1
     while True:
-        params = {**base_params, "page": page}
-        data = get_json(url, params)
+        params = dict(base_params)
+        params["page"] = page
 
+        data = get_json(url, params)
         yield data
 
         next_link = data.get("links", {}).get("next")
@@ -97,28 +102,32 @@ param_modes = {
     "hospitalType": {"hospitalType": "true"}
 }
 
+# Tryby obsługujące parametry branżowe:
+endpoint_supports_modes = {
+    "hospitalizations-by-product-category": ["branch"],
+    "hospitalizations-by-admission-type-nfz-categorized": ["branch"],
+    "hospitalizations-by-healthcare-service": ["branch", "hospitalType"],
+}
+
 
 # ============================================================
 #   FUNKCJE POBIERAJĄCE
 # ============================================================
 
 def get_sections():
-    """Pobiera listę sekcji JGP."""
-    base_url = "https://api.nfz.gov.pl/app-stat-api-jgp/sections"
-
-    first = get_json(base_url)
+    url = "https://api.nfz.gov.pl/app-stat-api-jgp/sections"
+    first = get_json(url)
     last_page = int(first["links"]["last"][-1])
 
     sections = []
     for p in range(1, last_page + 1):
-        data = get_json(base_url, params={"page": p})
+        data = get_json(url, params={"page": p})
         sections.extend(data["data"])
 
     return sections
 
 
 def get_jgp_codes(sections):
-    """Pobiera kody JGP dla wszystkich sekcji."""
     jgp_codes = []
 
     for s in tqdm(sections, desc="Sekcje"):
@@ -140,15 +149,21 @@ def get_jgp_codes(sections):
 
 
 def download_table(table_id, endpoint, mode_name, jgp_code, year):
-    """Pobiera dane jednej tabeli w danym trybie."""
     url = f"https://api.nfz.gov.pl/app-stat-api-jgp/{endpoint}/{table_id}"
+
+    # wybierz tryb TYLKO jeśli endpoint go obsługuje
+    if endpoint in endpoint_supports_modes:
+        if mode_name not in endpoint_supports_modes[endpoint] and mode_name != "default":
+            return []  # pomiń tryb nieobsługiwany
 
     base_params = {
         "limit": 25,
         "format": "json",
-        "api-version": "1.1",
-        **param_modes[mode_name]
+        "api-version": "1.1"
     }
+
+    if mode_name in param_modes:
+        base_params.update(param_modes[mode_name])
 
     rows = []
 
@@ -175,7 +190,7 @@ def download_table(table_id, endpoint, mode_name, jgp_code, year):
 
 
 # ============================================================
-#   GŁÓWNY KOD
+#   GŁÓWNY PROGRAM
 # ============================================================
 
 print("📥 Pobieram sekcje...")
@@ -185,13 +200,12 @@ print("📥 Pobieram kody JGP...")
 jgp_codes = get_jgp_codes(sections)
 print(f"✅ Znaleziono {len(jgp_codes)} kodów JGP")
 
+# struktury wynikowe
 table_data = {}
-
 for table_name in endpoint_map.keys():
-    for mode_name in param_modes.keys():
+    for mode_name in ["default", "branch", "hospitalType"]:
         key = f"{table_name}_{mode_name}" if mode_name != "default" else table_name
         table_data[key] = []
-
 
 print("\n=== START POBIERANIA ===")
 
@@ -201,6 +215,8 @@ for year in [2022]:
     print(f"\n📅 Rok: {year}")
 
     for jgp_code in tqdm(jgp_codes, desc="Kody JGP"):
+
+        # pobierz index tabel
         try:
             table_index = get_json(index_of_tables_url, {
                 "catalog": "1a",
@@ -233,7 +249,7 @@ for year in [2022]:
 
 
 # ============================================================
-#   TWORZENIE PLIKÓW
+#   ZAPIS DO PLIKÓW
 # ============================================================
 
 output_dir = "output_tables_complete_2022"
