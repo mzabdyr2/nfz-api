@@ -173,18 +173,22 @@ print("📥 Pobieram kody JGP...")
 jgp_codes = get_jgp_codes(sections)
 print(f"✅ Znaleziono {len(jgp_codes)} kodów JGP")
 
-table_data = {}
-for table_name in endpoint_map.keys():
-    for mode_name in param_modes.keys():
-        key = f"{table_name}_{mode_name}" if mode_name != "default" else table_name
-        table_data[key] = []
-
 print("\n=== START POBIERANIA ===")
 index_of_tables_url = "https://api.nfz.gov.pl/app-stat-api-jgp/index-of-tables"
 
-for year in [2022]:
+# ZMIANA: Pętla po latach 2010-2021
+for year in range(2010, 2022):  # 2010 do 2021 włącznie
     print(f"\n📅 Rok: {year}")
-    for jgp_code in tqdm(jgp_codes, desc="Kody JGP"):
+    
+    # Resetuj dane dla każdego roku
+    table_data = {}
+    for table_name in endpoint_map.keys():
+        for mode_name in param_modes.keys():
+            key = f"{table_name}_{mode_name}" if mode_name != "default" else table_name
+            table_data[key] = []
+    
+    # Pobierz dane dla danego roku
+    for jgp_code in tqdm(jgp_codes, desc=f"Kody JGP ({year})"):
         table_index = get_json(index_of_tables_url, {
             "catalog": "1a",
             "name": jgp_code,
@@ -213,21 +217,21 @@ for year in [2022]:
                     # jeśli tabela nie działa, po prostu pomiń
                     continue
 
-# ============================================================
-#   TWORZENIE PLIKÓW
-# ============================================================
+    # ============================================================
+    #   TWORZENIE PLIKÓW DLA DANEGO ROKU
+    # ============================================================
+    
+    output_dir = f"output_tables_{year}"
+    os.makedirs(output_dir, exist_ok=True)
 
-output_dir = "output_tables_complete_2022"
-os.makedirs(output_dir, exist_ok=True)
-
-for key, rows in table_data.items():
-    if not rows:
-        print(f"⚠️ Brak danych: {key}")
-        continue
-    df = pd.DataFrame(rows)
-    df = df.applymap(clean_for_excel)
-    path = f"{output_dir}/{key}.xlsx"
-    df.to_excel(path, index=False)
-    print(f"💾 Zapisano: {path}")
+    for key, rows in table_data.items():
+        if not rows:
+            print(f"⚠️ Brak danych: {key} (rok {year})")
+            continue
+        df = pd.DataFrame(rows)
+        df = df.applymap(clean_for_excel)
+        path = f"{output_dir}/{key}.xlsx"
+        df.to_excel(path, index=False)
+        print(f"💾 Zapisano: {path}")
 
 print("\n✅ ZAKOŃCZONO!")
