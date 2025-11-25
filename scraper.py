@@ -177,7 +177,7 @@ print("\n=== START POBIERANIA ===")
 index_of_tables_url = "https://api.nfz.gov.pl/app-stat-api-jgp/index-of-tables"
 
 # ZMIANA: Pętla po latach 2010-2021
-for year in range(2010, 2022):  # 2010 do 2021 włącznie
+for year in range(2019, 2022):  # 2010 do 2021 włącznie
     print(f"\n📅 Rok: {year}")
     
     # Resetuj dane dla każdego roku
