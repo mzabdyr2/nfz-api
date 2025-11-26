@@ -234,17 +234,27 @@ for table in tables:
     #   TWORZENIE PLIKÓW DLA DANEGO ROKU
     # ============================================================
 
-    output_dir = f"output_tables_{year}"
-    os.makedirs(output_dir, exist_ok=True)
+    # ============================================================
+#    TWORZENIE STRUKTURY: output_tables_complete/<rok>/
+# ============================================================
 
-    for key, rows in table_data.items():
-        if not rows:
-            print(f"⚠️ Brak danych: {key} (rok {year})")
-            continue
-        df = pd.DataFrame(rows)
-        df = df.applymap(clean_for_excel)
-        path = f"{output_dir}/{key}.xlsx"
-        df.to_excel(path, index=False)
-        print(f"💾 Zapisano: {path}")
+complete_root = "output_tables_complete"
+os.makedirs(complete_root, exist_ok=True)
 
-print("\n✅ ZAKOŃCZONO!")
+year_dir = os.path.join(complete_root, str(year))
+os.makedirs(year_dir, exist_ok=True)
+
+for key, rows in table_data.items():
+    if not rows:
+        print(f"⚠️ Brak danych: {key} (rok {year})")
+        continue
+
+    df = pd.DataFrame(rows)
+    df = df.applymap(clean_for_excel)
+
+    # nazwa pliku bez roku (katalog odpowiada za rok)
+    file_path = os.path.join(year_dir, f"{key}.xlsx")
+
+    df.to_excel(file_path, index=False)
+    print(f"💾 Zapisano: {file_path}")
+
