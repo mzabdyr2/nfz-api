@@ -36,7 +36,7 @@ def get_json(url, params=None):
     try:
         response = session.get(url, params=params, timeout=20)
         response.raise_for_status()
-        return response. json()
+        return response.json()
     except requests.exceptions.HTTPError as e:
         if response.status_code == 400:
             # Zignoruj błędy 400, np. brak danych dla tej kombinacji
@@ -105,7 +105,7 @@ param_modes = {
 # ============================================================
 
 def get_sections():
-    base_url = "https://api. nfz.gov.pl/app-stat-api-jgp/sections"
+    base_url = "https://api.nfz.gov.pl/app-stat-api-jgp/sections"
     first = get_json(base_url)
     if not first:
         return []
@@ -126,12 +126,12 @@ def get_jgp_codes(sections):
             "limit": 25,
             "format": "json"
         }
-        for page in get_all_pages("https://api.nfz. gov.pl/app-stat-api-jgp/benefits", base_params):
+        for page in get_all_pages("https://api.nfz.gov.pl/app-stat-api-jgp/benefits", base_params):
             if not page:
                 continue
-            for row in page. get("data", []):
+            for row in page.get("data", []):
                 if "attributes" in row and "code" in row["attributes"]:
-                    jgp_codes. append(row["attributes"]["code"])
+                    jgp_codes.append(row["attributes"]["code"])
                 elif "code" in row:
                     jgp_codes.append(row["code"])
     return jgp_codes
@@ -154,10 +154,10 @@ def download_table(table_id, endpoint, mode_name, jgp_code, year):
             if mode_name == "branch" and "branch" in row:
                 row["branch_name"] = voivodeships_map.get(str(row["branch"]).zfill(2), row["branch"])
             if mode_name == "hospitalType" and "hospitalType" in row:
-                row["hospitalType_name"] = hospital_type_map. get(str(row["hospitalType"]), row["hospitalType"])
+                row["hospitalType_name"] = hospital_type_map.get(str(row["hospitalType"]), row["hospitalType"])
             row["year"] = year
             row["jgp_code"] = jgp_code
-            row["name"] = attributes. get("name")
+            row["name"] = attributes.get("name")
             row["table_id"] = table_id
             rows.append(row)
     return rows
@@ -178,62 +178,62 @@ index_of_tables_url = "https://api.nfz.gov.pl/app-stat-api-jgp/index-of-tables"
 
 # ZMIANA: Pętla po latach 2010-2021
 for year in range(2010, 2022):  # 2010 do 2021 włącznie
+for year in range(2019, 2022):  # 2010 do 2021 włącznie
     print(f"\n📅 Rok: {year}")
-    
+
     # Resetuj dane dla każdego roku
     table_data = {}
     for table_name in endpoint_map.keys():
-        for mode_name in param_modes. keys():
+        for mode_name in param_modes.keys():
             key = f"{table_name}_{mode_name}" if mode_name != "default" else table_name
             table_data[key] = []
-    
+
     # Pobierz dane dla danego roku
     for jgp_code in tqdm(jgp_codes, desc=f"Kody JGP ({year})"):
         table_index = get_json(index_of_tables_url, {
-            "catalog": "1a",
-            "name": jgp_code,
-            "year": year,
-            "format": "json"
-        })
-        if not table_index:
-            continue
-        
-        # POPRAWKA: Dodatkowa walidacja przed dostępem do tables
+    "catalog": "1a",
+    "name": jgp_code,
+    "year": year,
+    "format": "json"
+})
+if not table_index:
+    continue
+
+# BEZPIECZNE pobieranie "tables"
+try:
+    years = table_index["data"]["attributes"].get("years", [])
+    if not years:
+        continue
+
+    tables = years[0].get("tables")
+    if not tables:
+        continue
+except Exception:
+    continue
+
+# Pętla po tabelach
+for table in tables:
+    table_id = table["id"]
+    table_name = table["type"]
+
+    if table_name not in endpoint_map:
+        continue
+
+    endpoint = endpoint_map[table_name]
+
+    for mode_name in param_modes.keys():
+        key = f"{table_name}_{mode_name}" if mode_name != "default" else table_name
         try:
-            years_data = table_index. get("data", {}).get("attributes", {}).get("years", [])
-            if not years_data or len(years_data) == 0:
-                continue
-            tables = years_data[0]. get("tables")
-            if not tables:
-                continue
-        except (KeyError, IndexError, AttributeError, TypeError):
+            rows = download_table(table_id, endpoint, mode_name, jgp_code, year)
+            table_data[key].extend(rows)
+        except Exception:
             continue
 
-        for table in tables:
-            table_id = table. get("id")
-            table_name = table.get("type")
-            
-            # Sprawdź czy table_id i table_name nie są None
-            if not table_id or not table_name:
-                continue
-                
-            if table_name not in endpoint_map:
-                continue
-                
-            endpoint = endpoint_map[table_name]
-            for mode_name in param_modes.keys():
-                key = f"{table_name}_{mode_name}" if mode_name != "default" else table_name
-                try:
-                    rows = download_table(table_id, endpoint, mode_name, jgp_code, year)
-                    table_data[key].extend(rows)
-                except Exception as e:
-                    # jeśli tabela nie działa, po prostu pomiń
-                    continue
 
     # ============================================================
     #   TWORZENIE PLIKÓW DLA DANEGO ROKU
     # ============================================================
-    
+
     output_dir = f"output_tables_{year}"
     os.makedirs(output_dir, exist_ok=True)
 
