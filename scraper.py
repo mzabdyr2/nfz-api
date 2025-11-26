@@ -15,7 +15,7 @@ session.headers.update({"Accept": "application/json"})
 retries = Retry(
     total=5,
     backoff_factor=0.2,
-    status_forcelist=[429, 500, 502, 503, 504],  # <-- retry tylko dla tych
+    status_forcelist=[429, 500, 502, 503, 504],
     raise_on_status=False
 )
 
@@ -39,12 +39,9 @@ def get_json(url, params=None):
         return response.json()
     except requests.exceptions.HTTPError as e:
         if response.status_code == 400:
-            # Zignoruj błędy 400, np. brak danych dla tej kombinacji
             return None
-        else:
-            raise
-    except requests.exceptions.RequestException as e:
-        # Dowolne inne błędy sieciowe
+        return None
+    except requests.exceptions.RequestException:
         return None
 
 def get_all_pages(url, base_params):
@@ -65,6 +62,7 @@ def get_all_pages(url, base_params):
 # ============================================================
 #   MAPOWANIA
 # ============================================================
+
 voivodeships_map = {
     "01": "Dolnośląski", "02": "Kujawsko-Pomorski", "03": "Lubelski",
     "04": "Lubuski", "05": "Łódzki", "06": "Małopolski", "07": "Mazowiecki",
@@ -176,84 +174,74 @@ print(f"✅ Znaleziono {len(jgp_codes)} kodów JGP")
 print("\n=== START POBIERANIA ===")
 index_of_tables_url = "https://api.nfz.gov.pl/app-stat-api-jgp/index-of-tables"
 
-# ZMIANA: Pętla po latach 2010-2021  # 2010 do 2021 włącznie
-for year in range(2019, 2022):  # 2010 do 2021 włącznie
+# Tworzymy katalog główny
+main_output_dir = "output_tables_complete"
+os.makedirs(main_output_dir, exist_ok=True)
+
+# Lata do pobrania
+for year in range(2019, 2022):
     print(f"\n📅 Rok: {year}")
 
-    # Resetuj dane dla każdego roku
+    # Katalog na dany rok
+    yearly_output_dir = os.path.join(main_output_dir, str(year))
+    os.makedirs(yearly_output_dir, exist_ok=True)
+
+    # Reset danych w roku
     table_data = {}
     for table_name in endpoint_map.keys():
         for mode_name in param_modes.keys():
             key = f"{table_name}_{mode_name}" if mode_name != "default" else table_name
             table_data[key] = []
 
-    # Pobierz dane dla danego roku
+    # Pobieranie danych
     for jgp_code in tqdm(jgp_codes, desc=f"Kody JGP ({year})"):
         table_index = get_json(index_of_tables_url, {
-    "catalog": "1a",
-    "name": jgp_code,
-    "year": year,
-    "format": "json"
-})
-if not table_index:
-    continue
+            "catalog": "1a",
+            "name": jgp_code,
+            "year": year,
+            "format": "json"
+        })
+        if not table_index:
+            continue
 
-# BEZPIECZNE pobieranie "tables"
-try:
-    years = table_index["data"]["attributes"].get("years", [])
-    if not years:
-        continue
-
-    tables = years[0].get("tables")
-    if not tables:
-        continue
-except Exception:
-    continue
-
-# Pętla po tabelach
-for table in tables:
-    table_id = table["id"]
-    table_name = table["type"]
-
-    if table_name not in endpoint_map:
-        continue
-
-    endpoint = endpoint_map[table_name]
-
-    for mode_name in param_modes.keys():
-        key = f"{table_name}_{mode_name}" if mode_name != "default" else table_name
         try:
-            rows = download_table(table_id, endpoint, mode_name, jgp_code, year)
-            table_data[key].extend(rows)
+            years = table_index["data"]["attributes"].get("years", [])
+            if not years:
+                continue
+            tables = years[0].get("tables")
+            if not tables:
+                continue
         except Exception:
             continue
 
+        # Pobieranie tabel
+        for table in tables:
+            table_id = table["id"]
+            table_name = table["type"]
 
-    # ============================================================
-    #   TWORZENIE PLIKÓW DLA DANEGO ROKU
-    # ============================================================
+            if table_name not in endpoint_map:
+                continue
 
-    # ============================================================
-#    TWORZENIE STRUKTURY: output_tables_complete/<rok>/
-# ============================================================
+            endpoint = endpoint_map[table_name]
 
-complete_root = "output_tables_complete"
-os.makedirs(complete_root, exist_ok=True)
+            for mode_name in param_modes.keys():
+                key = f"{table_name}_{mode_name}" if mode_name != "default" else table_name
+                try:
+                    rows = download_table(table_id, endpoint, mode_name, jgp_code, year)
+                    table_data[key].extend(rows)
+                except Exception:
+                    continue
 
-year_dir = os.path.join(complete_root, str(year))
-os.makedirs(year_dir, exist_ok=True)
+    # Zapis danych w katalogu danego roku
+    for key, rows in table_data.items():
+        if not rows:
+            print(f"⚠️ Brak danych: {key} (rok {year})")
+            continue
 
-for key, rows in table_data.items():
-    if not rows:
-        print(f"⚠️ Brak danych: {key} (rok {year})")
-        continue
+        df = pd.DataFrame(rows)
+        df = df.applymap(clean_for_excel)
+        path = os.path.join(yearly_output_dir, f"{key}.xlsx")
+        df.to_excel(path, index=False)
+        print(f"💾 Zapisano: {path}")
 
-    df = pd.DataFrame(rows)
-    df = df.applymap(clean_for_excel)
-
-    # nazwa pliku bez roku (katalog odpowiada za rok)
-    file_path = os.path.join(year_dir, f"{key}.xlsx")
-
-    df.to_excel(file_path, index=False)
-    print(f"💾 Zapisano: {file_path}")
-
+print("\n✅ ZAKOŃCZONO!")
