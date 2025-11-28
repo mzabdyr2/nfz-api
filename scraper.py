@@ -179,7 +179,7 @@ main_output_dir = "output_tables_complete"
 os.makedirs(main_output_dir, exist_ok=True)
 
 # Lata do pobrania
-for year in range(2019, 2020):
+for year in range(2020, 2021):
     print(f"\n📅 Rok: {year}")
 
     # Katalog na dany rok
